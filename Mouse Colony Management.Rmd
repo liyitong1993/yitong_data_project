@@ -33,15 +33,16 @@ colony_label = read.csv('Colony Key.csv')
 
 
 ```{r, echo = F}
-#Add colony column based on the cage name
-Colony = rep('Colony', dim(mouse)[1])
 
-
-#load mouse list from previous session
+#Load mouse list from previous session
 if (file.exists('UI_Mouse_List.RData')){
   load(file = 'UI_Mouse_List.RData')
-  mouse = add_column(mouse_all, Colony, .before = 1)
+  #add colony column based on the cage name
+  Colony = rep('Colony', dim(mouse2)[1])
+  mouse = add_column(mouse2, Colony, .before = 1)
 }else{
+  #add colony column based on the cage name
+  Colony = rep('Colony', dim(mouse)[1])
   mouse = add_column(mouse, Colony, .before = 1)
 }
 
@@ -58,7 +59,7 @@ for (i in 1:dim(mouse)[1]) {
   }
 }
 
-
+#convert all characters to factors in the list 
 for(i in 1:dim(mouse)[2]){
   mouse[, i] =type.convert(mouse[,i])
   i = i+1
@@ -103,7 +104,8 @@ runApp( list(
                    actionButton("addRow2", "Add Row"),
                    DTOutput('tableS')),
           tabPanel('All Cages', 
-                   actionButton("addRow", "Add Row"),
+                   actionButton("addRow", "Add A Row"),
+                   actionButton('deleteRow', 'Delete A Row'),
                    DTOutput('tableAll')),
           tabPanel('Summary', 
                    h2('This is the Summary Page: '),
@@ -111,7 +113,7 @@ runApp( list(
                    br(),
                    br(),
                    tags$li('This is a test work ', 
-                           em('mimicking the internship project but with free data')), 
+                           em('for the data app project')), 
                    verbatimTextOutput('summary'))
           )
         )
@@ -121,6 +123,7 @@ runApp( list(
   
   server = function(input, output) {
     
+    #populate Filter Item selections based on Fileter Coloumn input 
     output$filter = renderUI({
       selectInput('inputF2', 'Filter Item: ', 
                   c('No Filter', unique(mouse %>% select(input$inputF1))))
@@ -142,6 +145,10 @@ runApp( list(
     
     
     output$tableS = renderDT({
+      #validate input existence: 
+      validate(need(input$colony != "", 
+                    "Please select a column to anlyze the data. ")
+               )
       datatable(
         mouse_table() %>% 
           filter(Colony == input$colony) %>%
@@ -160,11 +167,15 @@ runApp( list(
     
     #allows interactive editing and data storage
     mouse_all = mouse %>% select(-Colony)
+   
+    #create an empty new row based on data format 
+    newrow = mouse_all %>% slice(1)
+    newrow[, 1:dim(newrow)[2]] = NA
     
-       newrow2 = mouse_all %>% slice(1)
-    newrow2[, 1:dim(newrow2)[2]] = NA
     
-    
+    #covert mouse_all to an reactive value to allow add and/or delete rows
+    #reactive value can be used as a function: mouse_all('new data')
+    #no need to use the reassign evaluation (<<-)
     mouse_all = reactiveVal(mouse_all)
     
     output$tableAll = renderDT({
@@ -179,15 +190,17 @@ runApp( list(
                 )
       })
     
+    
     observeEvent(input$tableAll_cell_edit, {
-      mouse_all() <<- editData(mouse_all(), input$tableAll_cell_edit, 
-                                'tableAll')
-      #save(mouse_all, file = 'UI_Mouse_List.RData')
+      mouse_all(editData(mouse_all(), input$tableAll_cell_edit, 
+                                'tableAll'))
+      mouse2 = mouse_all()
+      save(mouse2, file = 'UI_Mouse_List.RData')
         
     })
     
  
-    
+    #another way to generate an empty row based on data format
 #    newrow = mouse_all %>% 
       # get row 1 
 #      slice(1) %>%
@@ -200,22 +213,31 @@ runApp( list(
       # rearrange the column names to match that of the rest 
 #      select(colnames(mouse_all))
             
-    proxy = dataTableProxy(outputId = 'tableAll')
+   
    
      
     observeEvent(input$addRow, {
-      #ntable = mouse_all %>% addRow(newrow2)
-      ntable = rbind(newrow2, mouse_all())
+      ntable = rbind(newrow, mouse_all())
       mouse_all(ntable)
-      
-      
-      
-      #proxy %>% addRow(newrow)
-     # save(mouse, file = 'UI_Mouse_List.RData')
+      mouse2 = mouse_all()
+      save(mouse2, file = 'UI_Mouse_List.RData')
     
     })
     
     
+     observeEvent(input$deleteRow, {
+      ntable = mouse_all()
+      if (!is.null(input$tableAll_rows_selected)){
+        ntable = ntable[-as.numeric(input$tableAll_rows_selected),]
+        }
+      mouse_all(ntable)
+      mouse2 = mouse_all()
+      save(mouse2, file = 'UI_Mouse_List.RData')
+      
+      
+      })
+    
+  
    
     
     
@@ -224,8 +246,12 @@ runApp( list(
     
     
     mouse_grouped = reactive({
+      #validate input existence: 
+      validate(need(input$inputF1 != "", 
+                    "Please select a column to anlyze the data")
+               )
       mouse_table() %>% 
-        group_by_at(input$colony) %>%
+        group_by_at(input$inputF1) %>%
         summarize(Total.Cages = n()
                   ) %>%
         arrange(desc(Colony))
@@ -234,7 +260,7 @@ runApp( list(
     #plot Total Trips mesuring
     p1 = reactive({
       ggplotly(ggplot(data = mouse_grouped(), 
-                      aes(x = !!rlang::sym(input$colony), 
+                      aes(x = !!rlang::sym(input$inputF1), 
                           y = Total.Cages)) +
                  geom_bar(stat = 'identity', color = 'black', size = 0.3) + 
                  geom_text(aes(label = Total.Cages), color = 'black',
@@ -285,6 +311,8 @@ runApp( list(
   
   
 ```
+
+
 
 
 
