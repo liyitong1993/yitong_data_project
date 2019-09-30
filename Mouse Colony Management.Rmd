@@ -1,0 +1,292 @@
+---
+title: "Mouse Colony Management"
+author: "Yitong Li"
+date: "9/24/2019"
+output: html_document
+---
+
+
+```{r, echo=FALSE}
+#Load library packages
+library(shiny)   #for shiny interactive dashboard
+library(dplyr)  #for manipulating data
+library(tidyverse) #for manipulating data
+library(ggplot2)  #for plotting
+library(plotly)  #for interactive plotting
+library(DT)  #for interacitve tables
+library(crosstalk) # for interactions between plots and tables
+library(tibble) #for organizing dataframe 
+library(hash) #for labeling colony
+
+
+```
+
+
+```{r, echo=FALSE}
+#Load data
+setwd("~/Documents/Mouse Colony APP")
+mouse = read.csv('UNC_Animal_List_08_09_19.csv')
+mouse = mouse %>% filter(CAGE.No. != '')
+colony_label = read.csv('Colony Key.csv')
+
+```
+
+
+```{r, echo = F}
+#Add colony column based on the cage name
+Colony = rep('Colony', dim(mouse)[1])
+
+
+#load mouse list from previous session
+if (file.exists('UI_Mouse_List.RData')){
+  load(file = 'UI_Mouse_List.RData')
+  mouse = add_column(mouse_all, Colony, .before = 1)
+}else{
+  mouse = add_column(mouse, Colony, .before = 1)
+}
+
+
+#add '#' before the cage name to differentiate 'C ' from 'NFC ' during mapping
+
+for (i in 1:dim(mouse)[1]) {
+  for ( j in 1:dim(colony_label)[1]) {
+    if(grepl(paste0('#', colony_label$Abb[j]), paste0('#', mouse$CAGE.No.[i]))){
+      mouse$Colony[i] = as.character(colony_label$Colony.Name[j])
+      j = j+1
+      }
+  i = i+1
+  }
+}
+
+
+for(i in 1:dim(mouse)[2]){
+  mouse[, i] =type.convert(mouse[,i])
+  i = i+1
+}
+
+
+```
+
+
+```{r, echo = FALSE}
+#Initiate shiny
+
+
+runApp( list(
+  ui = fluidPage(
+   
+   # Application title
+   titlePanel("Mouse Colony Management"),
+   
+   # Sidebar with dropdown menu seletion input 
+   sidebarLayout( 
+      sidebarPanel(
+        img(src = 'imagename.png', width = 200, align = 'centered'),
+        br(),
+        br(),
+        selectInput('colony', 'Colony: ', 
+                    mouse$Colony, selected = mouse$Colony[1]),
+        selectInput('cageType', 'Cage Type: ', 
+                    c('All', as.character(mouse$SEX)), selected = 'All'),
+        selectInput('inputF1', 'Filtering Column: ',
+                    colnames(mouse), selected = colnames(mouse)[2]),
+        uiOutput('filter'),
+        p(downloadButton('x0', 'Download Selected Data', class = 'text-center'))
+      ),
+      
+      # Mainpanel is seprated into several tabs using the tablsetPanel function
+      mainPanel(
+        tabsetPanel(
+          tabPanel('Plots', plotlyOutput('barPlot1')),
+          tabPanel('Different Plots', plotlyOutput('barPlot2')),
+          tabPanel('Selected Cages', 
+                   actionButton("addRow2", "Add Row"),
+                   DTOutput('tableS')),
+          tabPanel('All Cages', 
+                   actionButton("addRow", "Add Row"),
+                   DTOutput('tableAll')),
+          tabPanel('Summary', 
+                   h2('This is the Summary Page: '),
+                   br(),
+                   br(),
+                   br(),
+                   tags$li('This is a test work ', 
+                           em('mimicking the internship project but with free data')), 
+                   verbatimTextOutput('summary'))
+          )
+        )
+      )
+   ), #right ) for ui
+  
+  
+  server = function(input, output) {
+    
+    output$filter = renderUI({
+      selectInput('inputF2', 'Filter Item: ', 
+                  c('No Filter', unique(mouse %>% select(input$inputF1))))
+      })
+ 
+       
+    #provide table output based on cageType input
+    mouse_table = reactive({
+      
+      if (req(input$cageType) != 'All'){
+        mouse_table = mouse %>% filter(SEX == input$cageType)
+        }
+      else{ 
+        mouse_table = mouse
+        }
+      return(mouse_table)
+      
+      })
+    
+    
+    output$tableS = renderDT({
+      datatable(
+        mouse_table() %>% 
+          filter(Colony == input$colony) %>%
+          select(-Colony), 
+        class = 'cell-border stripe hover responsive compact', 
+        caption = htmltools::tags$caption(
+          stype = 'caption-side: top; text-align: left;',
+          htmltools::strong('Table 1: '), 
+          htmltools::em('cages from selected colony and/or cage type'))
+                ) 
+      })
+    
+   
+    
+    
+    
+    #allows interactive editing and data storage
+    mouse_all = mouse %>% select(-Colony)
+    
+       newrow2 = mouse_all %>% slice(1)
+    newrow2[, 1:dim(newrow2)[2]] = NA
+    
+    
+    mouse_all = reactiveVal(mouse_all)
+    
+    output$tableAll = renderDT({
+      datatable(
+        mouse_all(), editable = 'cell', extensions = 'KeyTable',
+        options = list(lengthChange = T, key = T),
+        class = 'cell-border stripe hover responsive compact', 
+        caption = htmltools::tags$caption(
+          stype = 'caption-side: top; text-align: left;',
+          htmltools::strong('Table 2: '), 
+          htmltools::em('All cages'))
+                )
+      })
+    
+    observeEvent(input$tableAll_cell_edit, {
+      mouse_all() <<- editData(mouse_all(), input$tableAll_cell_edit, 
+                                'tableAll')
+      #save(mouse_all, file = 'UI_Mouse_List.RData')
+        
+    })
+    
+ 
+    
+#    newrow = mouse_all %>% 
+      # get row 1 
+#      slice(1) %>%
+      # transpose row 1 into two columns 
+#      gather(key = 'column_name', value = 'value') %>% 
+      # remove all value 
+#      mutate(value = '') %>%
+      # re-shape the data back to the original format
+#      spread(column_name, value) %>% 
+      # rearrange the column names to match that of the rest 
+#      select(colnames(mouse_all))
+            
+    proxy = dataTableProxy(outputId = 'tableAll')
+   
+     
+    observeEvent(input$addRow, {
+      #ntable = mouse_all %>% addRow(newrow2)
+      ntable = rbind(newrow2, mouse_all())
+      mouse_all(ntable)
+      
+      
+      
+      #proxy %>% addRow(newrow)
+     # save(mouse, file = 'UI_Mouse_List.RData')
+    
+    })
+    
+    
+   
+    
+    
+    
+    
+    
+    
+    mouse_grouped = reactive({
+      mouse_table() %>% 
+        group_by_at(input$colony) %>%
+        summarize(Total.Cages = n()
+                  ) %>%
+        arrange(desc(Colony))
+      })
+    
+    #plot Total Trips mesuring
+    p1 = reactive({
+      ggplotly(ggplot(data = mouse_grouped(), 
+                      aes(x = !!rlang::sym(input$colony), 
+                          y = Total.Cages)) +
+                 geom_bar(stat = 'identity', color = 'black', size = 0.3) + 
+                 geom_text(aes(label = Total.Cages), color = 'black',
+                           position = position_stack(vjust = 0.9)) + 
+                 ggtitle ('Total Trips') + 
+                 theme_classic() + 
+                 theme(plot.title = element_text(face = 'bold', color ='black',
+                                                 size = 15, hjust = 0.5),
+                       axis.line = element_line(color = 'black', size = 0.4, 
+                                                linetype = 'solid'),
+                       axis.ticks = element_line(size = 0.6),
+                       axis.title.y = element_text(face = 'bold',
+                                                   color = 'black', angle = 90),
+                       axis.text.y = element_text(face = 'bold', 
+                                                  color = 'black', angle = 0),
+                       axis.title.x = element_text(face = 'bold'),
+                       axis.text.x = element_blank(),
+                       panel.grid.major.y = element_line(color = 'grey', 
+                                                         size = 0.5)
+                       ) + 
+                 ylab('Total Number of Cages')
+               )
+      
+      })
+
+    
+    output$barPlot1 = renderPlotly({
+      subplot(p1(), p1(), 
+              nrows = 2, shareX = F, titleY = T, margin = 0.04, 
+              which_layout = 'merge') %>%
+        layout(title = 'Mouse Colony Management',
+               width = 700, height = 600, 
+               legend = list(orientation = 'h', x = 0.2, y = -0.3))
+      })
+    
+    
+   
+    
+    
+    } #server right ) 
+  
+  
+  
+))  #right )) for runApp and list
+
+  
+  
+  
+  
+```
+
+
+
+
+
